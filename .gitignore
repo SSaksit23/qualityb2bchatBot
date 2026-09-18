@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.npm-cache/
+data/
+*.db
+*.db-shm
+*.db-wal
+auth/
+__pycache__/
+*.tar.gz
+coverage/
+playwright-report/
+test-results/

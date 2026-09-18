@@ -1,0 +1,35 @@
+[Unit]
+Description=QualityB2B LINE agent Bobo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qualityb2b-bobo
+Group=qualityb2b-bobo
+WorkingDirectory=/opt/qualityb2b-bobo
+EnvironmentFile=/etc/qualityb2b-bobo/bobo.env
+Environment=BOBO_DATA_DIR=/var/lib/qualityb2b-bobo
+Environment=BOBO_RUNTIME_DIR=/run/qualityb2b-bobo
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/qualityb2b-bobo/browsers
+ExecStart=/opt/line-hub/runtime/bin/node /opt/qualityb2b-bobo/app.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=70
+UMask=0077
+StateDirectory=qualityb2b-bobo
+StateDirectoryMode=0700
+RuntimeDirectory=qualityb2b-bobo
+RuntimeDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=1G
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

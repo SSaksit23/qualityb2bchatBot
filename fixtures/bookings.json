@@ -1,0 +1,7 @@
+{
+  "departures": { "GO2CTS4NCTSTG261205A": { "allotment": 31 } },
+  "bookings": [
+    { "code": "BK2026000379342", "tourCode": "GO2CTS4NCTSTG261205A", "status": "ใบสั่งซื้อใหม่(รอจ่ายเงิน)", "adults": 3, "children": 0, "total": 198600, "balance": 198600, "lapseAt": "2026-09-20T10:18:00+07:00", "missing": ["email"], "incompleteRows": 1, "bookingUrl": "https://www.qualityb2bpackage.com/booking/manage/fixture" },
+    { "code": "BK2026000379343", "tourCode": "GO2CTS4NCTSTG261205A", "status": "การันตี", "adults": 2, "children": 1, "guaranteeDate": "2026-09-25", "missing": [] }
+  ]
+}

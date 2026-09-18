@@ -1,0 +1,102 @@
+<svg width="100%" viewBox="0 0 680 610" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>LINE to Hermes to Quality B2B architecture</title>
+<desc>Topology: LINE platform sends signed webhooks into a Hostinger VPS. A LINE gateway fans messages to an ingest worker and the Hermes agent. Ingest feeds a nightly KG builder and the Neo4j plus pgvector knowledge graph. Hermes retrieves from the graph and acts through a single-concurrency Playwright booking adapter, which drives the legacy Quality B2B back-office. A scheduler runs deadline sweeps, an approval store gates staged writes, and an audit log records every action.</desc>
+<style>
+.box{fill:#ffffff;stroke:#5F5E5A;stroke-width:1.5}
+.t{font-family:sans-serif;font-size:14px;fill:#2C2C2A}
+.ts{font-family:sans-serif;font-size:12px;fill:#5F5E5A}
+.th{font-family:sans-serif;font-size:14px;font-weight:500;fill:#2C2C2A}
+.arr{stroke:#5F5E5A;stroke-width:1.5;fill:none;marker-end:url(#ah)}
+.b{fill:#E6F1FB;stroke:#185FA5;stroke-width:1.5}
+.bt{fill:#0C447C}.bs{fill:#185FA5}
+.p{fill:#EEEDFE;stroke:#534AB7;stroke-width:1.5}
+.pt{fill:#3C3489}.ps{fill:#534AB7}
+.tl{fill:#E1F5EE;stroke:#0F6E56;stroke-width:1.5}
+.tlt{fill:#085041}.tls{fill:#0F6E56}
+.g{fill:#F1EFE8;stroke:#5F5E5A;stroke-width:1.5}
+.gt{fill:#2C2C2A}.gs{fill:#5F5E5A}
+</style>
+<defs><marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="none" stroke="#5F5E5A" stroke-width="1.2"/></marker></defs>
+
+<rect x="40" y="118" width="600" height="364" rx="12" class="box"/>
+<text x="52" y="137" class="gs">Hostinger VPS</text>
+
+<rect x="190" y="44" width="300" height="48" rx="8" class="g"/>
+<text x="340" y="65" text-anchor="middle" class="th" fill="#2C2C2A">LINE platform</text>
+<text x="340" y="82" text-anchor="middle" class="ts" fill="#5F5E5A">OA · Messaging API</text>
+
+<line x1="325" y1="92" x2="325" y2="144" class="arr"/>
+<text x="319" y="122" text-anchor="end" class="ts">webhook</text>
+<line x1="360" y1="145" x2="360" y2="93" class="arr"/>
+<text x="368" y="122" text-anchor="start" class="ts">reply · push</text>
+
+<rect x="150" y="145" width="380" height="44" rx="6" class="b"/>
+<text x="340" y="165" text-anchor="middle" class="th" fill="#0C447C">LINE gateway</text>
+<text x="340" y="181" text-anchor="middle" class="ts" fill="#185FA5">verify · dedupe · enqueue</text>
+
+<line x1="230" y1="189" x2="152" y2="221" class="arr"/>
+<text x="150" y="209" text-anchor="start" class="ts">every msg</text>
+<line x1="330" y1="189" x2="330" y2="221" class="arr"/>
+<text x="337" y="209" text-anchor="start" class="ts">@bot</text>
+
+<rect x="60" y="222" width="160" height="50" rx="6" class="b"/>
+<text x="140" y="244" text-anchor="middle" class="th" fill="#0C447C">Ingest worker</text>
+<text x="140" y="261" text-anchor="middle" class="ts" fill="#185FA5">redact · stitch</text>
+
+<rect x="250" y="222" width="160" height="50" rx="6" class="p"/>
+<text x="330" y="244" text-anchor="middle" class="th" fill="#3C3489">Hermes agent</text>
+<text x="330" y="261" text-anchor="middle" class="ts" fill="#534AB7">reasoning layer</text>
+
+<rect x="440" y="222" width="160" height="50" rx="6" class="b"/>
+<text x="520" y="244" text-anchor="middle" class="th" fill="#0C447C">Scheduler</text>
+<text x="520" y="261" text-anchor="middle" class="ts" fill="#185FA5">deadline sweeps</text>
+
+<line x1="140" y1="272" x2="140" y2="304" class="arr"/>
+<line x1="330" y1="272" x2="330" y2="304" class="arr"/>
+<text x="337" y="292" text-anchor="start" class="ts">retrieve</text>
+<line x1="410" y1="247" x2="439" y2="313" class="arr"/>
+<text x="430" y="288" text-anchor="start" class="ts">act</text>
+<line x1="520" y1="272" x2="520" y2="304" class="arr"/>
+
+<rect x="60" y="305" width="160" height="50" rx="6" class="p"/>
+<text x="140" y="327" text-anchor="middle" class="th" fill="#3C3489">KG builder</text>
+<text x="140" y="344" text-anchor="middle" class="ts" fill="#534AB7">nightly extract</text>
+
+<rect x="250" y="305" width="160" height="50" rx="6" class="p"/>
+<text x="330" y="327" text-anchor="middle" class="th" fill="#3C3489">Knowledge graph</text>
+<text x="330" y="344" text-anchor="middle" class="ts" fill="#534AB7">Neo4j + pgvector</text>
+
+<rect x="440" y="305" width="160" height="50" rx="6" class="tl"/>
+<text x="520" y="327" text-anchor="middle" class="th" fill="#085041">Booking adapter</text>
+<text x="520" y="344" text-anchor="middle" class="ts" fill="#0F6E56">Playwright worker</text>
+
+<line x1="220" y1="330" x2="249" y2="330" class="arr"/>
+
+<rect x="150" y="400" width="170" height="50" rx="6" class="g"/>
+<text x="235" y="422" text-anchor="middle" class="th" fill="#2C2C2A">Approval store</text>
+<text x="235" y="439" text-anchor="middle" class="ts" fill="#5F5E5A">staged · TTL</text>
+
+<rect x="360" y="400" width="170" height="50" rx="6" class="g"/>
+<text x="445" y="422" text-anchor="middle" class="th" fill="#2C2C2A">Audit log</text>
+<text x="445" y="439" text-anchor="middle" class="ts" fill="#5F5E5A">append-only</text>
+
+<line x1="300" y1="400" x2="447" y2="357" class="arr"/>
+<text x="352" y="374" text-anchor="start" class="ts">approved</text>
+<line x1="480" y1="355" x2="461" y2="399" class="arr"/>
+
+<line x1="575" y1="355" x2="575" y2="511" class="arr"/>
+<text x="570" y="492" text-anchor="end" class="ts">drives UI</text>
+
+<rect x="400" y="512" width="220" height="50" rx="8" class="g"/>
+<text x="510" y="534" text-anchor="middle" class="th" fill="#2C2C2A">Quality B2B back-office</text>
+<text x="510" y="551" text-anchor="middle" class="ts" fill="#5F5E5A">legacy PHP · no API</text>
+
+<rect x="60" y="580" width="12" height="12" rx="3" class="b"/>
+<text x="78" y="590" text-anchor="start" class="ts">infra</text>
+<rect x="150" y="580" width="12" height="12" rx="3" class="p"/>
+<text x="168" y="590" text-anchor="start" class="ts">reasoning + KG</text>
+<rect x="330" y="580" width="12" height="12" rx="3" class="tl"/>
+<text x="348" y="590" text-anchor="start" class="ts">booking actions</text>
+<rect x="500" y="580" width="12" height="12" rx="3" class="g"/>
+<text x="518" y="590" text-anchor="start" class="ts">external · governance</text>
+</svg>

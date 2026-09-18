@@ -1,0 +1,13 @@
+{
+  "name": "โบโบ้",
+  "slug": "qualityb2b-bobo",
+  "lineBasicId": "@719xcwgl",
+  "lineChannelId": "2011654458",
+  "lineBotUserId": "U72707de51c9321546199e9c039bbdbd5",
+  "locale": "th-TH",
+  "timezone": "Asia/Bangkok",
+  "bookingBaseUrl": "https://www.qualityb2bpackage.com",
+  "status": "v0.6.2-deployed-private-pilot",
+  "bookingMode": "read-only",
+  "humanSavesChanges": true
+}
