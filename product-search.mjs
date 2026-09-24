@@ -1,3 +1,4 @@
+import {travelWindow,strictDate} from './travel-window.mjs';
 const REPORT_PATH = '/report/report_seat';
 const SEARCH_PATH = '/report/get_report_seat';
 const OWNERS = new Map([
@@ -36,7 +37,7 @@ const dateParts = value => {
   if(!match)return null;
   const year=Number(match[3])>2400?Number(match[3])-543:Number(match[3]);
   const iso=`${year}-${match[2]}-${match[1]}`;
-  return Number.isNaN(Date.parse(iso+'T00:00:00+07:00'))?null:iso;
+  return strictDate(year,Number(match[2]),Number(match[1]));
 };
 const displayDate = iso => {const [y,m,d]=iso.split('-');return `${d}/${m}/${y}`;};
 
@@ -57,6 +58,8 @@ export function projectProductReport(category) {
   const headers=[...(table?.querySelectorAll('thead tr:first-child th,thead tr:first-child td')||[])].map(text);
   const expected=['ลำดับ','ชื่อโปรแกรมทัวร์','ประเทศ','เส้นทาง','สายการบิน','รหัสทัวร์','เว็บไซต์','วันเดินทาง','วันเดินทางกลับ','ราคาเริ่มต้น','โควต้ารวม','จองรวม','ใช้ตั๋ว','ไม่ใช้ตั๋ว','คงเหลือ'];
   if(!table||headers.length!==expected.length||headers.some((value,index)=>value!==expected[index]))throw Error('Product report table changed');
+  const pager=[...document.querySelectorAll('#report_seller a[data-page]')];
+  if(pager.some(a=>!a.parentElement.classList.contains('footable-page')&&!a.parentElement.classList.contains('footable-page-arrow'))||!pager.length&&document.querySelector('#report_seller .pagination'))throw Error('Incomplete product pagination');
   const rows=[];let program='';
   for(const row of table.querySelectorAll('tbody tr,tfoot tr')){
     const cells=[...row.cells].map(text);
@@ -89,6 +92,7 @@ function normalizeRow(row, query) {
   const departureDate=dateParts(row.departureDate),returnDate=dateParts(row.returnDate);
   const numbers=Object.fromEntries(['startingPrice','quota','booked','useTicket','noTicket','remaining'].map(key=>[key,integer(row[key])]));
   if(!owner||!clean(row.program)||!clean(row.tourCode)||!clean(row.country)||!clean(row.route)||!departureDate||!returnDate
+    ||returnDate<departureDate
     ||Object.values(numbers).some(value=>!Number.isSafeInteger(value)||value<0))throw Error('Unrecognized product row');
   const matches=queryTargets(query).some(target=>target.scope==='country'
     ?clean(row.country).toLowerCase()===target.country.toLowerCase()
@@ -110,7 +114,7 @@ export function summarizeProducts(rawRows, query, baseUrl, readAt) {
     }
     seen.set(key,row);unique.push(row);
   }
-  const departures=unique.filter(row=>row.remaining>=query.requiredSeats).sort((a,b)=>
+  const departures=unique.filter(row=>row.remaining>=query.requiredSeats&&(query.dateMode!=='whole_trip'||row.returnDate<=query.departureTo)).sort((a,b)=>
     (a.category==='open'?0:1)-(b.category==='open'?0:1)||a.departureDate.localeCompare(b.departureDate)||a.startingPrice-b.startingPrice);
   const programs=new Set(departures.map(row=>`${row.ownerDomain}|${row.program}`));
   return {query:{...query},programCount:programs.size,departureCount:departures.length,departures,
@@ -148,6 +152,7 @@ function destinationFrom(text,proposal={}){
   return {city:value,country:proposal.country,menu:proposal.menu,routes:[...new Set(routes)]};
 }
 export function periodFrom(text,clock=Date.now){
+  const window=travelWindow(text,clock);if(window)return window.error?null:window.period;
   const value=clean(text),now=bangkokParts(clock);
   const range=/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})\s*(?:-|–|ถึง|to)\s*(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/i.exec(value);
   if(range){
@@ -191,7 +196,7 @@ export function resolveProductQuery({destinationText,timeText,seatsText,country,
   const routeRefinement=destinationText&&context?.city==='ซินเจียง'&&/เหนือ|ใต้|ตะวันตก|northern?|southern?|western?/i.test(destinationText);
   const refinement=routeRefinement?`ซินเจียง ${destinationText}`:destinationText;
   const destination=refinement?destinationFrom(refinement,{country,menu,routes}):context&&{city:context.city,country:context.country,menu:context.menu,routes:context.routes||[context.route].filter(Boolean)};
-  const period=timeText?periodFrom(timeText,clock):context&&{departureFrom:context.departureFrom,departureTo:context.departureTo,periodLabel:context.periodLabel};
+  const period=timeText?periodFrom(timeText,clock):context&&{departureFrom:context.departureFrom,departureTo:context.departureTo,periodLabel:context.periodLabel,dateMode:context.dateMode||'departure'};
   if(!destination)return {kind:'product_clarify',message:'กรุณาระบุจุดหมายที่ค้นหา เช่น “ซินเจียง” หรือ “ฮาร์บิน”'};
   if(!period)return {kind:'product_clarify',message:'กรุณาระบุเดือน ฤดูกาล หรือช่วงวันเดินทาง เช่น “ต.ค.” “หน้าหนาว” หรือ 1/10/2569-31/10/2569'};
   let requiredSeats=destinationText&&!routeRefinement?1:context?.requiredSeats||1;
@@ -208,7 +213,7 @@ export function resolveCatalogProductQuery({destinationText,timeText,seatsText,d
   const targets=selected.length?selected.map(entry=>({scope:entry.scope,country:entry.country||'',menu:entry.menu||'',route:entry.route||'',label:entry.label}))
     :followup&&context?.targets?context.targets:null;
   if(!targets?.length)return {kind:'product_clarify',message:'กรุณาระบุจุดหมายที่ค้นหาค่ะ'};
-  const period=timeText?periodFrom(timeText,clock):followup&&context&&{departureFrom:context.departureFrom,departureTo:context.departureTo,periodLabel:context.periodLabel};
+  const period=timeText?periodFrom(timeText,clock):followup&&context&&{departureFrom:context.departureFrom,departureTo:context.departureTo,periodLabel:context.periodLabel,dateMode:context.dateMode||'departure'};
   if(!period)return {kind:'product_clarify',message:'กรุณาระบุเดือน ฤดูกาล หรือช่วงวันเดินทาง เช่น “ต.ค.” “หน้าหนาว” หรือ 1/10/2569-31/10/2569'};
   let requiredSeats=followup?context?.requiredSeats||1:1;
   if(seatsText){const normalized=normalizeDigits(seatsText),match=/(\d{1,3})/.exec(normalized),thai={หนึ่ง:1,สอง:2,สาม:3,สี่:4,ห้า:5,หก:6,เจ็ด:7,แปด:8,เก้า:9,สิบ:10};requiredSeats=match?Number(match[1]):Object.entries(thai).find(([word])=>normalized.includes(word))?.[1];}
@@ -231,6 +236,7 @@ function isPureRefinement(value,{routeText,period,seats}){
 }
 
 export function parseProductQuery(text, clock=Date.now, context=null) {
+  const window=travelWindow(text,clock);if(window?.error)return {kind:'product_clarify',message:window.error};
   const source=normalizeOperational(text),explicit=/^\/search\b/i.test(source),value=source.replace(/^\/search\s*/i,'');
   const destinations=DESTINATIONS.filter(item=>item.pattern.test(value));
   if(destinations.length>1)return {kind:'product_clarify',message:'กรุณาระบุจุดหมายครั้งละหนึ่งแห่งค่ะ'};
@@ -273,9 +279,25 @@ async function configure(page, query, category, target) {
   if(result.error){const error=Error(result.error);error.code='UNKNOWN_DESTINATION';throw error;}
 }
 
-export async function readProductSearch(config, query, clock=Date.now) {
+export function productReadError(error){
+  if(error.code)return error;
+  error.code=error.name==='TimeoutError'?'REPORT_TIMEOUT':/net::ERR_|ECONNRESET|ECONNREFUSED/.test(error.message)?'REPORT_TRANSIENT':/Incomplete product pagination/.test(error.message)?'REPORT_INCOMPLETE':'REPORT_INVALID';
+  return error;
+}
+
+export async function readProductSearch(config,query,clock=Date.now){
+  for(let attempt=0;attempt<2;attempt++){
+    const started=Date.now();
+    config.signal?.throwIfAborted();
+    try{return await readProductSearchOnce(config,query,clock);}
+    catch(cause){const error=productReadError(cause);console.error(JSON.stringify({event:'product_read_failure',stage:error.stage||'report',code:error.code,durationMs:Date.now()-started,attempt:attempt+1,filters:{routes:query.routes,from:query.departureFrom,to:query.departureTo,mode:query.dateMode||'departure',seats:query.requiredSeats}}));if(config.signal?.aborted||attempt||!['REPORT_TIMEOUT','REPORT_TRANSIENT'].includes(error.code))throw error;}
+  }
+}
+
+async function readProductSearchOnce(config, query, clock=Date.now) {
   const {chromium}=await import('playwright');const browser=await chromium.launch({headless:true});
   const abort=()=>void browser.close().catch(()=>{});config.signal?.addEventListener('abort',abort,{once:true});
+  let stage='session';
   try{
     config.signal?.throwIfAborted();
     const context=await browser.newContext({storageState:config.storageState,serviceWorkers:'block'});
@@ -287,23 +309,25 @@ export async function readProductSearch(config, query, clock=Date.now) {
     if(new URL(page.url()).pathname!==REPORT_PATH||await page.locator('#frm_search').count()!==1)throw Error('Product report page changed');
     const raw=[];
     for(const target of queryTargets(query))for(const category of ['open','automatic']){
-      await configure(page,query,category,target);
+      stage='configure';await configure(page,query,category,target);stage='search_response';
       await page.locator('#report_seller').evaluate(el=>el.replaceChildren());
       const responsePromise=page.waitForResponse(response=>new URL(response.url()).pathname===SEARCH_PATH&&response.request().method()==='POST');
       const [response]=await Promise.all([responsePromise,page.locator('#frm_search .report_search').click()]);
-      if(!response.ok())throw Error('Product report request failed');
-      let payload;try{payload=await response.json();}catch{throw Error('Invalid product report response');}
+      if([401,403].includes(response.status()))throw Object.assign(Error('Session expired'),{code:'SESSION_EXPIRED'});
+      if(!response.ok())throw Object.assign(Error('Product report request failed'),{code:[502,503,504].includes(response.status())?'REPORT_TRANSIENT':'REPORT_INVALID'});
+      stage='report_structure';let payload;try{payload=await response.json();}catch{throw Error('Invalid product report response');}
       if(typeof payload.strHtml!=='string'||typeof payload.setting!=='string')throw Error('Invalid product report response');
       const responseText=payload.strHtml.replace(/<[^>]+>/g,' ').replace(/&nbsp;|\s+/g,' ').trim();
       if(!/<table[\s>]/i.test(payload.strHtml)){
         if(!responseText||/^(?:ไม่พบข้อมูล(?:ที่ค้นหา)?|ไม่มีข้อมูล|ไม่พบรายการ|no data|data not found)[.!\s]*$/i.test(responseText))continue;
-        throw Error(`Product report returned no table for ${target.label||target.route||target.country}/${category}: ${responseText.slice(0,160)}`);
+        throw Error('Invalid product report response');
       }
-      await page.waitForFunction(()=>document.querySelector('#report_seller table')&&!document.querySelector('#report_seller .spiner-example'));
+      // Match the rendered table to this response, never to a previous search.
+      await page.waitForFunction(html=>{const template=document.createElement('template');template.innerHTML=html;const expected=template.content.querySelector('table');const actual=document.querySelector('#report_seller table');const rows=table=>JSON.stringify([...table.rows].filter(row=>!row.querySelector('a[data-page]')&&[...row.cells].some(cell=>cell.textContent.trim())).map(row=>[...row.cells].map(cell=>cell.textContent.replace(/\s+/g,' ').trim())));return expected&&actual&&rows(expected)===rows(actual)&&!document.querySelector('#report_seller .spiner-example');},payload.strHtml);
       raw.push(...await page.evaluate(projectProductReport,category));
     }
-    return summarizeProducts(raw,query,config.baseUrl,new Date(clock()).toISOString());
-  }finally{config.signal?.removeEventListener('abort',abort);await browser.close();}
+    stage='validate_rows';return summarizeProducts(raw,query,config.baseUrl,new Date(clock()).toISOString());
+  }catch(error){error.stage=stage;throw error;}finally{config.signal?.removeEventListener('abort',abort);await browser.close();}
 }
 
 const optionCatalog=select=>[...select.options].map(option=>({value:option.value,label:(option.textContent||'').replace(/\s+/g,' ').trim()})).filter(option=>option.value&&option.label&&!/^[-\s]*เลือก/i.test(option.label));

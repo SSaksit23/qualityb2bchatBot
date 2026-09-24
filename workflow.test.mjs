@@ -8,6 +8,7 @@ import { parseProductQuery,resolveProductQuery,resolveCatalogProductQuery,summar
 import { safeModelText,validatePlan,runWorkflow,catalogContainer,validateCatalogPlan,runCatalogWorkflow,CLARIFY } from './workflow.mjs';
 import { createApp,push } from './app.mjs';
 import { parseIntent } from './booking.mjs';
+import {travelWindow} from './travel-window.mjs';
 const clock=()=>Date.parse('2026-09-18T08:00:00Z');
 const query={kind:'search_products',city:'ฮาร์บิน',country:'China',menu:'China',routes:['Harbin'],periodLabel:'ช่วงปีใหม่',departureFrom:'2026-12-25',departureTo:'2027-01-05',requiredSeats:1,rangeDisplay:'25/12/2026–05/01/2027'};
 const row=(i,extra={})=>({program:'โปรแกรม A',owner:'Go365',departureDate:`2026-12-${25+i}`,returnDate:'2027-01-03',airline:'CA',remaining:20+i,startingPrice:50000+i,tourCode:`GO1TEST${i}`,category:'open',...extra});
@@ -112,7 +113,7 @@ test('persistent context continues with fresh reads, survives restart, expires, 
 test('screenshot shorthand, typo and tour code requests bypass the planner',async t=>{
  const s=await setup(t);
  s.app.enqueue(s.event('one','ซินเจียง ต.ค.'));await s.app.tick();assert.equal(s.calls,0);assert.match(s.sent[0][3],/วันออกเดินทาง: 1 ต.ค. 2569–31 ต.ค. 2569/);
- s.app.enqueue(s.event('two','ซินเจียง ต.ค. 4 ที่ มีที่เรียดใหนรับได้มั่ง'));await s.app.tick();assert.equal(s.calls,0);assert.match(s.sent[1][3],/ต้องการที่นั่ง: อย่างน้อย 4 ที่นั่ง/);
+ s.app.enqueue(s.event('two','ซินเจียง ต.ค. 4 ที่ มีที่เรียดใหนรับได้มั่ง'));await s.app.tick();assert.equal(s.calls,0);assert.match(s.sent[1][3],/จำนวนที่ต้องการ: อย่างน้อย 4 ที่นั่ง/);
  s.app.enqueue(s.event('three','2UURC7NURCCA261226\nจองแล้วกี่ที่'));await s.app.tick();assert.equal(s.calls,0);assert.match(s.sent[2][3],/ยอดจองทั้งหมด 3 บุ๊กกิ้ง รวม 7 คน/);
 });
 test('a new destination bypasses stale product context and reaches the planner',async t=>{
@@ -214,4 +215,49 @@ test('owner can authorize another private chat with a hashed one-time invite',as
  app.enqueue(event('join',staff,`/join ${invite}`));await app.tick();assert.equal(sent[1][1],staff);assert.match(sent[1][3],/เชื่อมบัญชี LINE นี้/);
  assert.equal(app.db.prepare('SELECT count(*) count FROM authorized_users').get().count,1);assert.doesNotMatch(JSON.stringify(app.db.prepare('SELECT * FROM invites').all()),new RegExp(invite));
  app.enqueue(event('hello',staff,'สวัสดี'));await app.tick();assert.match(sent[2][3],/โบโบ้รับข้อความได้แล้ว/);
+});
+
+test('travel windows extract exact original spans and independently resolve seats and destination',()=>{
+ for(const range of ['10–20 ต.ค.','10 ถึง 20 ตุลาคม','๑๐–๒๐ ตค','10-20ต.ค.2569','10–20 ต.ค. 2026']){
+  const text=`ฉงชิ่ง เดินทาง ${range} เดินทาง ๔ ที่ มีที่ไหนรับได้บ้าง`;
+  const c=catalogContainer(text,null,clock);assert.equal(c.destinationPhrase.text,'ฉงชิ่ง');
+  for(const field of ['destinationPhrase','timePhrase','seatPhrase'])assert.equal(text.slice(c[field].start,c[field].end),c[field].text);
+  const q=validateCatalogPlan({destinationIndexes:[1],suggestionIndexes:[],ambiguous:false},c,catalog,null,clock);
+  assert.equal(q.departureFrom,'2026-10-10');assert.equal(q.departureTo,'2026-10-20');assert.equal(q.requiredSeats,4);assert.equal(q.dateMode,'whole_trip');assert.equal(q.targets[0].route,'Chongqing');
+ }
+ assert.equal(travelWindow('ออกเดินทาง 10–20 ต.ค.',clock).period.dateMode,'departure');
+ assert.equal(travelWindow('28 ก.พ. 2571–1 มี.ค. 2571',clock).period.departureFrom,'2028-02-28');
+ assert.equal(travelWindow('28 ธ.ค. 2569–5 ม.ค. 2570',clock).period.departureTo,'2027-01-05');
+ for(const range of ['20–10 ต.ค.','30–31 ก.พ.','28–29 ก.พ. 2569','10–20 ต.ค. และ พ.ย.','10–20 ต.ค. หรือ 21–25 ต.ค.'])assert.ok(travelWindow(range,clock).error,range);
+ assert.ok(catalogContainer('ฉงชิ่ง 10–20 ต.ค. 4 ที่ 5 คน',null,clock).clarification);
+});
+
+test('whole-trip filtering never sums seats, accepts inclusive boundaries and rejects malformed dates',()=>{
+ const q={kind:'search_products',city:'ฉงชิ่ง',routes:['Chongqing'],country:'China',menu:'China',departureFrom:'2026-10-10',departureTo:'2026-10-20',dateMode:'whole_trip',requiredSeats:4};
+ const r=(code,from,to,seats)=>({program:'โปรแกรมทดสอบ',owner:'2ucenter.com',country:'China',route:'Chongqing',airline:'CA',tourCode:code,departureDate:from,returnDate:to,startingPrice:'10000',quota:'20',booked:'0',useTicket:'0',noTicket:'0',remaining:String(seats),category:'open'});
+ const rows=[r('2UA','10/10/2026','20/10/2026',4),r('2UB','15/10/2026','21/10/2026',4),r('2UC','10/10/2026','20/10/2026',3)];
+ const result=summarizeProducts(rows,q,'https://example.test',new Date(clock()).toISOString());
+ assert.deepEqual(result.departures.map(r=>r.tourCode),['2UA']);
+ assert.equal(summarizeProducts(rows,{...q,dateMode:'departure'},'https://example.test',result.readAt).departureCount,2);
+ for(const invalid of ['', '31/02/2026','09/10/2026'])assert.throws(()=>summarizeProducts([r('2UA','10/10/2026',invalid,4)],q,'https://example.test',result.readAt));
+ const page=productPage(q,result);assert.match(page.text,/เดินทางและกลับภายใน/);assert.match(page.text,/อย่างน้อย 4 ที่นั่ง/);
+ const empty=productPage(q,{...result,departures:[],programCount:0});assert.match(empty.text,/ไม่พบรอบที่ตรงเงื่อนไข/);assert.match(empty.text,/ออกเดินทาง/);
+});
+
+test('travel window context survives refinements and resets for new month searches',()=>{
+ const initial=catalogContainer('ฉงชิ่ง เดินทาง 10–20 ต.ค. 4 ที่',null,clock);
+ const plan={destinationIndexes:[1],suggestionIndexes:[],ambiguous:false};
+ const prior=validateCatalogPlan(plan,initial,catalog,null,clock);
+ const c=catalogContainer('เอา 5 ที่',prior,clock);
+ const refined=validateCatalogPlan({...plan,destinationIndexes:[]},c,catalog,prior,clock);
+ assert.equal(refined.dateMode,'whole_trip');assert.equal(refined.departureTo,'2026-10-20');assert.equal(refined.requiredSeats,5);
+ const replacement=validateCatalogPlan({...plan,destinationIndexes:[0]},catalogContainer('ปักกิ่ง พ.ย.',prior,clock),catalog,prior,clock);
+ assert.equal(replacement.dateMode||'departure','departure');assert.equal(replacement.requiredSeats,1);assert.equal(replacement.departureFrom,'2026-11-01');
+});
+
+test('deadline exhaustion keeps the validated travel scope in the failure reply',async()=>{
+ const controller=new AbortController();
+ const reply=await runCatalogWorkflow({config:{},text:'ฉงชิ่ง เดินทาง 10–20 ต.ค. 4 ที่',context:null,clock,signal:controller.signal,catalog,catalogVersion:'v1',
+  planner:async()=>({destinationIndexes:[1],suggestionIndexes:[],ambiguous:false}),savePlan:()=>{},execute:async()=>{controller.abort();controller.signal.throwIfAborted();}});
+ assert.match(reply,/2026-10-10–2026-10-20/);assert.match(reply,/Chongqing/);assert.match(reply,/อย่างน้อย 4 ที่นั่ง/);assert.doesNotMatch(reply,/ไม่พบรอบ/);
 });

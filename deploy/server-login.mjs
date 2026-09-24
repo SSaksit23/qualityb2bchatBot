@@ -1,36 +1,46 @@
 import {chromium} from 'playwright';
-import {mkdirSync,writeFileSync,renameSync,chmodSync} from 'node:fs';
+import {mkdirSync,writeFileSync,renameSync,chmodSync,existsSync,unlinkSync} from 'node:fs';
 const base='https://www.qualityb2bpackage.com';
-const output='/var/lib/qualityb2b-bobo/auth/state.json';
+const directory='/var/lib/qualityb2b-bobo/auth';
+const output=directory+'/state.json',candidate=directory+'/pending-state.json';
 const status='/run/qualityb2b-bobo-login/status';
 const report=s=>{writeFileSync(status,s+'\n',{mode:0o644});chmodSync(status,0o644);console.log(s);};
+const save=(path,state)=>{mkdirSync(directory,{recursive:true,mode:0o700});writeFileSync(path+'.new',JSON.stringify(state),{mode:0o600});chmodSync(path+'.new',0o600);renameSync(path+'.new',path);};
+let stage='open_browser';
 const browser=await chromium.launch({headless:false,args:['--disable-dev-shm-usage'],timeout:30000});
 try{
-  const context=await browser.newContext({viewport:{width:1100,height:760}});
+  // Reuse candidate cookies after a verification failure; never discard the active state.
+  const context=await browser.newContext({viewport:{width:1280,height:900},...(existsSync(candidate)?{storageState:candidate}:existsSync(output)?{storageState:output}:{})});
   const page=await context.newPage();
-  await page.goto(base+'/member/login',{waitUntil:'domcontentloaded'});report('WAITING_FOR_OFFICIAL_LOGIN');
+  await page.goto(base+'/booking',{waitUntil:'domcontentloaded',timeout:45000});
+  report('WAITING_FOR_OFFICIAL_LOGIN');
   const end=Date.now()+20*60000;
+  let attempted=false,verified=false;
   while(Date.now()<end){
     await new Promise(r=>setTimeout(r,1000));
     if(page.isClosed())throw Error('LOGIN_WINDOW_CLOSED');
-    const url=new URL(page.url());
-    if(url.origin!==base||url.pathname.startsWith('/member/login'))continue;
-    await page.goto(base+'/booking',{waitUntil:'domcontentloaded',timeout:45000});
-    if(new URL(page.url()).pathname!=='/booking')continue;
-    await page.locator('#frm_search #tourcode').waitFor({state:'visible',timeout:20000});
-    await page.locator('#booking_list').waitFor({state:'attached',timeout:20000});
-    const state=await context.storageState();
+    // A temporary URL during login is not proof of successful authentication.
+    const authenticated=await page.locator('a[href="/member/logout"],a[href="'+base+'/member/logout"]').count();
+    if(!authenticated||attempted)continue;
+    attempted=true;stage='save_candidate';save(candidate,await context.storageState());
     const verifier=await chromium.launch({headless:true});
     try{
-      const check=await verifier.newContext({storageState:state});const tab=await check.newPage();
-      await tab.goto(base+'/booking',{waitUntil:'domcontentloaded',timeout:45000});
-      await tab.locator('#frm_search #tourcode').waitFor({state:'visible',timeout:20000});
-      if(new URL(tab.url()).pathname!=='/booking')throw Error('HEADLESS_SESSION_REJECTED');
+      const check=await verifier.newContext({storageState:candidate});const tab=await check.newPage();
+      for(const path of ['/booking','/report/report_seat']){
+        stage=path==='/booking'?'booking_verification':'report_verification';
+        await tab.goto(base+path,{waitUntil:'domcontentloaded',timeout:45000});
+        await tab.locator('#frm_search').waitFor({state:'attached',timeout:20000});
+        if(new URL(tab.url()).pathname!==path||await tab.locator('input[type="password"]').count())throw Error('SESSION_REJECTED');
+        const selectors=path==='/booking'?['#frm_search input[name="tourcode"]','#booking_list']:['#frm_search [name="website[]"]','#frm_search [name="start_date"]','#frm_search [name="end_date"]'];
+        for(const selector of selectors)await tab.locator(selector).waitFor({state:'attached',timeout:20000});
+      }
+      save(output,await check.storageState());unlinkSync(candidate);verified=true;report('SESSION_SAVED_AND_HEADLESS_VERIFIED');
+    }catch(error){
+      report(`LOGIN_VERIFICATION_PENDING stage=${stage} code=${error.name==='TimeoutError'?'TIMEOUT':error.message==='SESSION_REJECTED'?'SESSION_REJECTED':'BROWSER_ERROR'}`);
+      // Keep the authenticated browser and candidate for inspection, without retrying credentials.
     }finally{await verifier.close();}
-    mkdirSync('/var/lib/qualityb2b-bobo/auth',{recursive:true,mode:0o700});
-    writeFileSync(output+'.new',JSON.stringify(state),{mode:0o600});renameSync(output+'.new',output);
-    report('SESSION_SAVED_AND_HEADLESS_VERIFIED');process.exitCode=0;break;
+    if(verified)break;
   }
-  if(Date.now()>=end)report('LOGIN_TIMED_OUT');
-}catch{report('LOGIN_NOT_VERIFIED');process.exitCode=1;}
+  if(!verified){report(attempted?'LOGIN_CANDIDATE_SAVED_NOT_VERIFIED':'LOGIN_TIMED_OUT');process.exitCode=1;}
+}catch(error){report(`LOGIN_NOT_VERIFIED stage=${stage} code=${error.name==='TimeoutError'?'TIMEOUT':error.message==='LOGIN_WINDOW_CLOSED'?'WINDOW_CLOSED':'BROWSER_ERROR'}`);process.exitCode=1;}
 finally{await browser.close();}

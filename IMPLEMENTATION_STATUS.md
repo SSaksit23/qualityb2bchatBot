@@ -1,4 +1,12 @@
-# Implementation status — 18 September 2026
+# Implementation status — 24 September 2026
+
+## v0.6.3 — travel windows (deployed 24 September 2026)
+
+Shared-month and cross-month date ranges now resolve locally with original source spans. Whole-trip ranges require both departure and return within the window; explicit ออกเดินทาง retains departure-only matching. Thai digits, Buddhist/Gregorian years, strict return-date validation, independent seat extraction, context retention, and grouped headers are covered by tests. Older contexts retain departure-only behavior.
+
+Report completion is matched to its own response. Malformed/partial reports fail closed; transient failures retry once within the job signal. Specific Thai errors include interpreted filters. Diagnostics record only stage, code, duration and normalized filters, not page text.
+
+All 55 tests passed locally and on Hostinger staging (/opt/qualityb2b-bobo-release-063). Production now runs v0.6.3. Fresh website comparison passed: four whole-trip departures versus seven departure-only departures. A fresh process using the installed reader returned four again after the service restart. Private LINE receipt remains the owner acceptance step. Live reproduction on 24 September confirmed the old query widened 10–20 October to the entire month; its read failed with SESSION_EXPIRED. Session renewal passed booking and report checks in a fresh headless browser. The protected state persists across restarts. The login helper now retains a candidate on verification failure, and report comparison ignores only the observed client-side pagination controls and their empty placeholder row. The release live gate passed; deployment now waits for actual readiness rather than three seconds. No stored jobs or contexts were modified.
 
 ## v0.6.2 — multiple authorized private chats
 

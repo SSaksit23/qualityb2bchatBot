@@ -11,6 +11,12 @@ const nowIso = clock => new Date(clock()).toISOString();
 
 export class BookingUnavailable extends Error {}
 
+export function productFailureMessage(code,query={}){
+  const messages={SESSION_EXPIRED:'เซสชัน Quality B2B หมดอายุ กรุณาให้ผู้ดูแลเข้าสู่ระบบบนเซิร์ฟเวอร์ใหม่',REPORT_TIMEOUT:'เว็บไซต์ตอบกลับช้าเกินไป จึงยังตรวจสอบผลครบไม่ได้ กรุณาลองใหม่ค่ะ',REPORT_TRANSIENT:'เชื่อมต่อรายงานเว็บไซต์ไม่สำเร็จ กรุณาลองใหม่ค่ะ',REPORT_INCOMPLETE:'รายงานมีผลหลายหน้าที่ยังตรวจสอบไม่ครบ จึงยังสรุปผลไม่ได้ กรุณาแจ้งผู้ดูแลค่ะ',REPORT_INVALID:'รูปแบบรายงานหรือข้อมูลวันที่จากเว็บไซต์ไม่ตรงกับที่ตรวจสอบไว้ จึงยังสรุปผลไม่ได้ กรุณาแจ้งผู้ดูแลค่ะ'};
+  const scope=query.departureFrom&&query.departureTo?`\nเส้นทางที่ค้น: ${(query.routes||[]).join(', ')}\n${query.dateMode==='whole_trip'?'เดินทางและกลับภายใน':'วันออกเดินทาง'}: ${query.departureFrom}–${query.departureTo}\nจำนวนที่ต้องการ: อย่างน้อย ${query.requiredSeats} ที่นั่ง`:'';
+  return (messages[code]||'อ่านรายงานไม่ได้ จึงยังยืนยันผลการค้นหาไม่ได้ กรุณาแจ้งผู้ดูแลค่ะ')+scope;
+}
+
 export function createBookingReader(config, { clock = Date.now, fixture } = {}) {
   let queue = Promise.resolve();
   let sessionVersion='',lastReadAt=null,state=config.bookingVerified?'unverified':'disabled';
@@ -57,11 +63,11 @@ export function createBookingReader(config, { clock = Date.now, fixture } = {}) 
       if(!config.storageState)throw new BookingUnavailable('ยังไม่ได้เชื่อมต่อเซสชัน Quality B2B');
       let version;try{version=String(statSync(config.storageState).mtimeMs);}catch{productState='missing';throw new BookingUnavailable('ไม่พบเซสชัน Quality B2B กรุณาให้ผู้ดูแลเข้าสู่ระบบบนเซิร์ฟเวอร์');}
       if(version!==sessionVersion){sessionVersion=version;state=config.bookingVerified?'unverified':'disabled';productState='unverified';}
-      if(productState==='expired'){const error=new BookingUnavailable('เซสชัน Quality B2B หมดอายุ กรุณาให้ผู้ดูแลเข้าสู่ระบบใหม่');error.code='SESSION_EXPIRED';error.sessionVersion=sessionVersion;throw error;}
+      if(productState==='expired'){const error=new BookingUnavailable(productFailureMessage('SESSION_EXPIRED',input));error.code='SESSION_EXPIRED';error.sessionVersion=sessionVersion;throw error;}
       try{const result=tool==='product_catalog'?await readProductCatalog({...config,signal:input.signal},clock):await readProductSearch({...config,signal:input.signal},input,clock);productState='ready';productLastReadAt=result.readAt;return {...result,sessionVersion};}
       catch(error){
         if(error.code==='UNKNOWN_DESTINATION'){const unavailable=new BookingUnavailable('ไม่พบจุดหมายหรือเส้นทางนี้ในตัวกรองเว็บไซต์ กรุณาระบุชื่ออื่นหรือรายละเอียดเพิ่ม');unavailable.code=error.code;throw unavailable;}
-        productState=error.code==='SESSION_EXPIRED'?'expired':'unavailable';if(productState==='expired')state='expired';const unavailable=new BookingUnavailable(productState==='expired'?'เซสชัน Quality B2B หมดอายุ กรุณาให้ผู้ดูแลเข้าสู่ระบบบนเซิร์ฟเวอร์ใหม่':'ค้นหาโปรแกรมไม่ได้หรือผลรายงานไม่ครบ กรุณาลองใหม่หรือแจ้งผู้ดูแล');unavailable.code=error.code;unavailable.sessionVersion=sessionVersion;throw unavailable;}
+        productState=error.code==='SESSION_EXPIRED'?'expired':'unavailable';if(productState==='expired')state='expired';const unavailable=new BookingUnavailable(productFailureMessage(error.code,input));unavailable.code=error.code||'BROWSER_FAILURE';unavailable.sessionVersion=sessionVersion;throw unavailable;}
     }
     if(!config.bookingVerified)throw new BookingUnavailable('โบโบ้รับข้อความแล้ว แต่ยังไม่เปิดการอ่านข้อมูลจองจริง กำลังเชื่อมต่อและตรวจสอบระบบ Quality B2B');
     if (!config.storageState) throw new BookingUnavailable('ยังไม่ได้เชื่อมต่อเซสชัน Quality B2B');

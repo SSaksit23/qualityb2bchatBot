@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {readProductCatalog,readProductSearch} from '../product-search.mjs';
+import {catalogContainer,interpretCatalog,validateCatalogPlan} from '../workflow.mjs';
+import {productPage} from '../product-format.mjs';
+const config={baseUrl:'https://www.qualityb2bpackage.com',storageState:process.env.B2B_STORAGE_STATE,openaiKey:process.env.OPENAI_API_KEY,model:process.env.OPENAI_MODEL||'gpt-5.4-mini'};
+const text='ฉงชิ่ง เดินทาง 10–20 ต.ค. เดินทาง 4 ที่ มีที่ไหนรับได้บ้าง';
+const catalog=(await readProductCatalog({...config,signal:AbortSignal.timeout(90000)})).entries;
+const container=catalogContainer(text),plan=await interpretCatalog(config,container,catalog,AbortSignal.timeout(20000));
+const query=validateCatalogPlan(plan,container,catalog,null);
+assert.equal(query.departureFrom,'2026-10-10');assert.equal(query.departureTo,'2026-10-20');assert.equal(query.dateMode,'whole_trip');assert.equal(query.requiredSeats,4);assert.ok(query.targets.every(t=>t.route==='Chongqing'));
+console.log(JSON.stringify({stage:'interpreted',filters:query,catalogEntries:catalog.length}));
+const facts=await readProductSearch({...config,signal:AbortSignal.timeout(85000)},query);
+const comparison=await readProductSearch({...config,signal:AbortSignal.timeout(85000)},{...query,dateMode:'departure'});
+const key=r=>[r.owner,r.tourCode,r.departureDate,r.returnDate,r.remaining,r.startingPrice].join('|');
+assert.deepEqual(facts.departures.map(key).sort(),comparison.departures.filter(r=>r.returnDate<=query.departureTo).map(key).sort());
+assert.ok(facts.departures.every(r=>r.departureDate>=query.departureFrom&&r.returnDate<=query.departureTo&&r.remaining>=4));
+console.log(JSON.stringify({stage:'website_compared',matchingDepartures:facts.departureCount,departureOnlyCount:comparison.departureCount,readAt:facts.readAt,rows:facts.departures.map(r=>({code:r.tourCode,from:r.departureDate,to:r.returnDate,seats:r.remaining,price:r.startingPrice,owner:r.owner,category:r.category}))}));
+const page=productPage(query,facts);assert.ok(page.text.length<=4500);console.log(page.text);console.log('TRAVEL_WINDOW_LIVE_CHECK_PASSED');

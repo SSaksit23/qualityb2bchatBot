@@ -1,6 +1,6 @@
 {
   "name": "qualityb2b-bobo",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": true,
   "type": "module",
   "engines": {
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node app.mjs",
-    "test": "node --test test.mjs workflow.test.mjs",
+    "test": "node --test test.mjs workflow.test.mjs travel-window.test.mjs",
     "check": "node --check app.mjs && node --check booking.mjs && node --check live-booking.mjs && node --check product-search.mjs && node --check hermes.mjs && node --check workflow.mjs && node --check product-format.mjs"
   },
   "dependencies": {

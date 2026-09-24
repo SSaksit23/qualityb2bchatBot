@@ -1,5 +1,6 @@
+import {travelWindow} from './travel-window.mjs';
 import { Annotation, StateGraph, START, END } from '@langchain/langgraph';
-import { containsSensitive } from './booking.mjs';
+import { containsSensitive,productFailureMessage } from './booking.mjs';
 import { resolveProductQuery, resolveCatalogProductQuery, periodFrom } from './product-search.mjs';
 
 process.env.LANGSMITH_TRACING='false';
@@ -92,22 +93,26 @@ const SEAT_PATTERN=/(?:เอา|จอง|อย่างน้อย|เหล
 const BLOCKED=/https?:|@|password|secret|token|ชื่อ|นามสกุล|พาสปอร์ต|ยกเลิก|ยืนยัน|ลบ|แก้ไข|บันทึก|cancel|delete|print|paid|<[^>]+>|ignore\s+instructions|system\s+prompt/i;
 const FILLER=/(?:^|\s)(?:ขอ|หา|ค้นหา|ค้น|ช่วย|ดู|เช็ค|ตรวจสอบ|โปรแกรม|ทัวร์|กรุ๊ป|เที่ยว|มี|ที่ว่าง|ว่าง|รับได้|ไหม|มั้ย|บ้าง|หน่อย|ครับ|ค่ะ|คะ|นะ)(?=\s|$)/gi;
 const compactOperational=value=>String(value||'').normalize('NFKC').replace(/[๐-๙]/g,d=>'0123456789'['๐๑๒๓๔๕๖๗๘๙'.indexOf(d)]).replace(/\s+/g,' ').trim();
-const span=(source,match)=>{if(!match)return null;const text=match[0].trim(),start=match.index+match[0].indexOf(text);return {text,start,end:start+text.length};};
+const span=(source,match)=>{if(!match)return null;const trimmed=match[0].trim(),start=match.index+match[0].indexOf(trimmed),end=start+trimmed.length;return {text:source.slice(start,end),start,end};};
 
 export function catalogContainer(text,context=null,clock=Date.now){
   if(typeof text!=='string'||text.length>1000||!text.trim()||containsSensitive(text)||BLOCKED.test(text))return null;
-  const source=compactOperational(text),timeMatch=TIME_PATTERNS.map(pattern=>pattern.exec(source)).find(Boolean),seatMatch=SEAT_PATTERN.exec(source);
+  const window=travelWindow(text,clock);if(window?.error)return {clarification:window.error};
+  const source=String(text).replace(/[๐-๙]/g,d=>'0123456789'['๐๑๒๓๔๕๖๗๘๙'.indexOf(d)]),seatMatch=SEAT_PATTERN.exec(source);
+  const timeMatch=window?.match||TIME_PATTERNS.map(pattern=>pattern.exec(source)).find(m=>m&&(!seatMatch||m.index+m[0].length<=seatMatch.index||m.index>=seatMatch.index+seatMatch[0].length));
+  if([...source.matchAll(new RegExp(SEAT_PATTERN.source,'gi'))].length>1)return {clarification:'กรุณาระบุจำนวนที่นั่งเพียงจำนวนเดียวค่ะ'};
   if(timeMatch&&!periodFrom(timeMatch[0],clock))return null;
   let destination=source;
-  for(const match of [timeMatch,seatMatch])if(match)destination=destination.replace(match[0],' ');
-  destination=destination.replace(FILLER,' ').replace(/(?:เปลี่ยนเป็น|เปลี่ยน|เฉพาะ)/g,' ').replace(/[.,!?()]/g,' ').replace(/\s+/g,' ').trim();
+  for(const match of [timeMatch,seatMatch].filter(Boolean).sort((a,b)=>b.index-a.index))destination=destination.slice(0,match.index)+' '+destination.slice(match.index+match[0].length);
+  destination=destination.replace(/(?:ออกเดินทาง|เดินทาง|มีที่(?:ไหน|ใหน|ใด)รับได้(?:บ้าง|มั่ง)?|มีที่(?:ไหน|ใหน|ใด)บ้าง)/g,' ').replace(FILLER,' ').replace(/(?:เปลี่ยนเป็น|เปลี่ยน|เฉพาะ)/g,' ').replace(/[.,!?()]/g,' ').replace(/\s+/g,' ').trim();
   const explicitRefinement=/(?:เปลี่ยน(?:เป็น)?|เฉพาะ)/.test(source)||!destination&&Boolean(context?.kind==='search_products');
   if(!destination&&!explicitRefinement)return null;
   if(!context?.kind&&!destination||!context?.kind&&!timeMatch&&!seatMatch)return null;
   const destinationIndex=destination?source.indexOf(destination):-1;
+  if(destination&&destinationIndex<0)return {clarification:'กรุณาระบุจุดหมายและช่วงวันเดินทางให้ชัดเจนอีกครั้งค่ะ'};
   return {destinationPhrase:destination?{text:destination,start:destinationIndex,end:destinationIndex+destination.length}:null,
-    timePhrase:span(source,timeMatch),seatPhrase:span(source,seatMatch),previousSearch:context?.kind==='search_products'?{
-      targets:context.targets||[],departureFrom:context.departureFrom,departureTo:context.departureTo,periodLabel:context.periodLabel,requiredSeats:context.requiredSeats}:null,
+    timePhrase:span(text,timeMatch),seatPhrase:span(text,seatMatch),previousSearch:context?.kind==='search_products'?{
+      targets:context.targets||[],departureFrom:context.departureFrom,departureTo:context.departureTo,periodLabel:context.periodLabel,dateMode:context.dateMode||'departure',requiredSeats:context.requiredSeats}:null,
     followup:explicitRefinement,catalogVersion:null};
 }
 
@@ -136,15 +141,16 @@ export function validateCatalogPlan(plan,container,catalog,context,clock=Date.no
 }
 
 export async function runCatalogWorkflow({config,text,context,clock,signal,catalog,catalogVersion,planner=interpretCatalog,savedPlan,savePlan,execute,onFailure=()=>{}}){
-  const container=catalogContainer(text,context,clock);if(!container){onFailure('local_rejection');return CLARIFY;}container.catalogVersion=catalogVersion;
+  const container=catalogContainer(text,context,clock);if(container?.clarification){onFailure('local_rejection');return container.clarification;}if(!container){onFailure('local_rejection');return CLARIFY;}container.catalogVersion=catalogVersion;
+  let validatedTask;
   const State=Annotation.Root({draft:Annotation(),task:Annotation(),reply:Annotation()});
   const graph=new StateGraph(State).addNode('interpret',async()=>({draft:savedPlan||await planner(config,container,catalog,signal)}))
-    .addNode('validate',async state=>{const task=validateCatalogPlan(state.draft,container,catalog,context,clock);await savePlan(state.draft);return {task};})
+    .addNode('validate',async state=>{const task=validateCatalogPlan(state.draft,container,catalog,context,clock);validatedTask=task;await savePlan(state.draft);return {task};})
     .addNode('read',async state=>({reply:await execute(state.task)})).addEdge(START,'interpret').addEdge('interpret','validate').addEdge('validate','read').addEdge('read',END).compile();
   try{const result=await graph.invoke({},{signal,callbacks:[],recursionLimit:8});onFailure('search_success');return result.reply;}
   catch(error){
-    if(signal.aborted)return 'ใช้เวลาค้นหานานเกินไป กรุณาลองใหม่ค่ะ';
-    const stage=error.code==='UNKNOWN_DESTINATION'||error.code==='AMBIGUOUS_DESTINATION'?'catalog_mismatch':error.code==='PRODUCT_CLARIFY'?'local_rejection':error.code==='BROWSER_FAILURE'||error.code==='SESSION_EXPIRED'?'browser_failure':'model_failure';onFailure(stage);
+    if(signal.aborted)return productFailureMessage('REPORT_TIMEOUT',validatedTask);
+    const stage=error.code==='UNKNOWN_DESTINATION'||error.code==='AMBIGUOUS_DESTINATION'?'catalog_mismatch':error.code==='PRODUCT_CLARIFY'?'local_rejection':error.code==='BROWSER_FAILURE'||error.code==='SESSION_EXPIRED'||error.code?.startsWith('REPORT_')?'browser_failure':'model_failure';onFailure(stage);
     if(['UNKNOWN_DESTINATION','AMBIGUOUS_DESTINATION'].includes(error.code))return `ไม่พบจุดหมายที่ตรงกันเพียงรายการเดียวในตัวกรองเว็บไซต์${error.suggestions?.length?`\nตัวเลือกใกล้เคียง: ${error.suggestions.join(', ')}`:''}\nกรุณาระบุจุดหมายอีกครั้งค่ะ`;
     if(error.code==='PRODUCT_CLARIFY')return error.message;
     if(stage==='browser_failure'&&error.message)return error.message;

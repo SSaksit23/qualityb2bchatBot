@@ -77,3 +77,11 @@ Xinjiang expands to `Xinjiang`, `Northern Xinjaing`, `Southern Xinjiang` and `We
 Release with `deploy/release-050.sh`. It runs the full suite, a live Harbin and Xinjiang read, and model checks for the initial Xinjiang request plus route/date follow-ups before enabling `BOBO_WORKFLOW_ENABLED=true`. Roll back interpretation immediately by setting that flag false and restarting only `qualityb2b-bobo`; restore the saved v0.5 backup only if the reader itself must be reverted.
 
 Deployment acceptance completed on 18 September 2026: Harbin returned 4 programs / 8 departures, Xinjiang returned 4 programs / 17 departures, and all three live model checks passed. The production service reports version 0.5.0 with workflow enabled. Immediately after a restart, booking and product readiness remain `unverified` until the first successful live lookup; this is expected and prevents a stale session from being reported as ready.
+
+## Session reuse and renewal — 24 September 2026
+
+The service reads `/var/lib/qualityb2b-bobo/auth/state.json` for every fresh browser context. This file persists across service restarts, is owned by `qualityb2b-bobo`, and has mode 0600. No password is stored by the helper.
+
+The official login helper first tries the existing saved state. After a manual login, it waits for the authenticated logout control, saves a protected candidate at `auth/pending-state.json`, and checks booking and report controls in a separate headless browser. It replaces `state.json` only after both checks pass. Failed verification retains the candidate and keeps the browser open for inspection; rerunning the helper reuses that candidate. Do not treat a control timeout as a rejected password.
+
+The successful status is `SESSION_SAVED_AND_HEADLESS_VERIFIED`. Stop the temporary viewer and close the SSH forwarding permission using `deploy/close-login.sh` after verification. Credentials must be entered only into the official website; automatic password retries are not configured.
